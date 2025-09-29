@@ -9,7 +9,8 @@ client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 # Supabase connection
 SUPABASE_URL = "https://lwvntviqpkfogdgmtnvp.supabase.co"
 # Service role key from Supabase dashboard (starts with eyJ…)
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx3dm50dmlxcGtmb2dkZ210bnZwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1ODgxOTIzMiwiZXhwIjoyMDc0Mzk1MjMyfQ.6A2VFHCfXtW68D4IDg0fxD6OTUjRpuzJSnq0pZPsqKQ"
+import os
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
