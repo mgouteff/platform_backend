@@ -1,1 +1,9 @@
-.gitignore
+# Ignore environment variables
+.env
+
+# Byte-compiled / cache
+__pycache__/
+
+# VSCode settings
+.vscode/
+
