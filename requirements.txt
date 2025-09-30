@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 openai
-supabase
+supabase-py
 python-dotenv
 requests
+
