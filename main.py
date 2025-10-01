@@ -1,37 +1,27 @@
 from fastapi import FastAPI
+import routes.query as query   # safer import style for Render
 from fastapi.middleware.cors import CORSMiddleware
-import logging
-
-# Import your routers or modules
-from query import router as query_router
-
-# Initialize logging
-logging.basicConfig(level=logging.INFO)
 
 # Create FastAPI app
-app = FastAPI()
-
-# CORS setup
-origins = [
-    "https://knowledge-platform-nb1egs.flutterflow.app",  # your FlutterFlow app
-    "http://localhost:3000",  # local testing (optional)
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],   # allows POST + handles OPTIONS preflight
-    allow_headers=["*"],   # allows any headers
+app = FastAPI(
+    title="Accounting Support App",
+    description="Ask questions, get answers from uploaded documents",
+    version="1.0.0"
 )
 
-# Include routers
-app.include_router(query_router)
+# Enable CORS (so FlutterFlow can call this API)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # replace with your FlutterFlow domain in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Root endpoint
+# Register routes
+app.include_router(query.router)
+
+# Root endpoint (just to test if server is running)
 @app.get("/")
 async def root():
-    return {"message": "Backend is running"}
-
-
-
+    return {"message": "FastAPI is running! Go to /docs for Swagger UI."}
