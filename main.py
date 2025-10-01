@@ -9,13 +9,20 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# ✅ Add CORS middleware right after creating the app
+# Allowed origins for FlutterFlow and local dev
+origins = [
+    "https://yourapp.flutterflow.app",   # replace with your actual FlutterFlow app URL
+    "http://localhost:8080",             # optional: local dev in FlutterFlow
+    "http://localhost",                  # optional: plain localhost
+]
+
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace "*" with your FlutterFlow domain
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=origins,        # only these domains can call your API
+    allow_credentials=True,       # allow cookies/authorization
+    allow_methods=["*"],          # allow all HTTP methods
+    allow_headers=["*"],          # allow all headers
 )
 
 # Register routes
@@ -25,4 +32,5 @@ app.include_router(query.router)
 @app.get("/")
 async def root():
     return {"message": "FastAPI is running! Go to /docs for Swagger UI."}
+
 
