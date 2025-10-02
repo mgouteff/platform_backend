@@ -34,3 +34,13 @@ def match_documents(query_embedding, top_k: int = 3):
         print("❌ ERROR: Supabase response did not contain 'data'. Full response:", response)
         return []
 
+def match_knowledge_base(embedding, limit):
+    response = supabase.rpc(
+        "match_knowledge_base",
+        {
+            "query_embedding": embedding,
+            "match_count": limit
+        }
+    ).execute()
+
+    return response.data

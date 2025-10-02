@@ -3,6 +3,7 @@
 
 # Byte-compiled / cache
 __pycache__/
+.venv
 
 # VSCode settings
 .vscode/
