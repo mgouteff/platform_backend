@@ -1,4 +1,5 @@
-# embedding_to_supabase.py
+print("🚀 Running NEW embedding_to_supabase.py from:", __file__)
+
 import os
 import re
 import uuid
@@ -118,31 +119,41 @@ def detect_method(text, filename=None):
 # Tagging Helpers
 # ----------------------------
 def extract_regex_tags(text):
-    """Capture universal structural markers (works across languages)."""
+    """Capture structural markers from Czech/European laws."""
     tags = set()
-    patterns = [
-        r"§\s*\d+[a-zA-Z]*",   # §45, §12a
-        r"\b\d+(\.\d+)+\b"     # 1.2, 2.3.4 subsections
-    ]
-    for pattern in patterns:
+
+    # Pattern 1: § with optional subsections and letters
+    # Examples: § 79, § 79 odst. 2, § 79 odst. 2 písm. b)
+    pattern_sections = r"§\s*\d+[a-zA-Z]*" \
+                       r"(?:\s*odst\.\s*\d+)?" \
+                       r"(?:\s*písm\.\s*[a-z])?"
+
+    # Pattern 2: Numbered subsections like 1.2, 2.3.4
+    pattern_subsections = r"\b\d+(\.\d+)+\b"
+
+    for pattern in [pattern_sections, pattern_subsections]:
         matches = re.findall(pattern, text)
-        tags.update([m.strip() for m in matches])
+        if matches:
+            # If pattern has capture groups, re.findall returns tuples → flatten
+            if isinstance(matches[0], tuple):
+                matches = ["".join(m) for m in matches]
+            tags.update(m.strip() for m in matches if m.strip())
+
     return list(tags)
 
 def gpt_generate_tags(text, max_semantic=5):
     """
     Use GPT to generate two sets of tags:
-    1. Structural references (unlimited, e.g., Článek 12, Hlava IV, Article 5, Paragraph 7)
-    2. Semantic meaning tags (limited, e.g., Overtime Pay, Termination Rights)
+    1. Structural references (unlimited)
+    2. Semantic meaning tags (up to max_semantic)
     """
     prompt = f"""Extract tags from the following text.
 Split them into two groups:
 
-1. Structural references (all of them, unlimited). These are numbered legal markers like Článek 12, Hlava IV, Article 5, Paragraph 7, §45, Section 2.
-Always return the full reference (word + number/roman numeral).
-2. Semantic meaning tags (up to {max_semantic}). These are short topic descriptors like Overtime Pay, Lunch Breaks, Termination Rights.
+1. Structural references (all of them, unlimited).
+2. Semantic meaning tags (up to {max_semantic}).
 
-Output them in this JSON format:
+Output JSON:
 {{
   "structural": ["..."],
   "semantic": ["..."]
@@ -179,7 +190,6 @@ Text:
 # Chunking Methods
 # ----------------------------
 def chunk_structure(text):
-    """Structure-based chunking with hybrid tagging (regex + GPT)."""
     paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
     chunks = []
     current_chunk, current_len = [], 0
@@ -201,24 +211,21 @@ def chunk_structure(text):
     for c in chunks:
         regex_tags = extract_regex_tags(c)
         gpt_structural, gpt_semantic = gpt_generate_tags(c, max_semantic=5)
-        combined_tags = regex_tags + gpt_structural + gpt_semantic
-
         chunk_dicts.append({
             "title": "General",
-            "tags": ", ".join(combined_tags),
+            "tags": {
+                "structural": regex_tags + gpt_structural,
+                "semantic": gpt_semantic
+            },
             "content": c
         })
-
     return chunk_dicts
 
 def chunk_meaning(text):
-    """Semantic chunking with GPT (preserves original content)."""
     blocks = [text[i:i+5000] for i in range(0, len(text), 5000)]
     all_chunks = []
-
     for block in blocks:
         chunked = parse_chunks(chunk_text(block))
-
         repaired_chunks = []
         for ch in chunked:
             if not is_valid_chunk(ch):
@@ -233,13 +240,10 @@ def chunk_meaning(text):
                     repaired_chunks.append(ch)
             else:
                 repaired_chunks.append(ch)
-
         all_chunks.extend(repaired_chunks)
-
     return all_chunks
 
 def chunk_fixed(text, chunk_size=650, overlap=150, max_semantic=5):
-    """Fixed-size chunking with overlap + GPT semantic tagging."""
     words = text.split()
     chunks = []
     step = chunk_size - overlap
@@ -248,21 +252,23 @@ def chunk_fixed(text, chunk_size=650, overlap=150, max_semantic=5):
         if not chunk:
             break
         content = " ".join(chunk)
-
         _, gpt_semantic = gpt_generate_tags(content, max_semantic=max_semantic)
-
         chunks.append({
             "title": f"Chunk {i+1}",
-            "tags": ", ".join(gpt_semantic),
+            "tags": {"structural": [], "semantic": gpt_semantic},
             "content": content
         })
-
     return chunks
 
 # ----------------------------
 # Main ingestion function
 # ----------------------------
-def ingest_file(file_path: str, force_method: str = None):
+def ingest_file(file_path: str, force_method: str = None, version: str = None):
+    if version is None:
+        version = input("Enter version number for this document (press Enter to skip): ").strip()
+        if version == "":
+            version = None
+
     filename = os.path.basename(file_path)
 
     text = ""
@@ -292,12 +298,12 @@ def ingest_file(file_path: str, force_method: str = None):
     csv_file = f"{os.path.splitext(filename)[0]}_{method}_{timestamp}.csv"
     with open(csv_file, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["id", "title", "content", "tags", "method", "source_file"])
+        writer.writerow(["id", "title", "content", "tags", "method", "source_file", "version"])
         for idx, ch in enumerate(chunks, 1):
             chunk_id = str(uuid.uuid4())
             title = ch.get("title") or f"{filename} - chunk {idx}"
-            tags = ch.get("tags", "")
             content = ch["content"]
+            tags = ch["tags"]
 
             embedding = get_embedding(content)
             supabase.table("documents").insert({
@@ -307,10 +313,11 @@ def ingest_file(file_path: str, force_method: str = None):
                 "tags": tags,
                 "method": method,
                 "source_file": filename,
-                "embedding": embedding
+                "embedding": embedding,
+                "version": version
             }).execute()
 
-            writer.writerow([chunk_id, title, content, tags, method, filename])
+            writer.writerow([chunk_id, title, content, tags, method, filename, version])
 
     print(f"✅ Inserted {len(chunks)} chunks into Supabase")
     print(f"📂 CSV saved: {csv_file}")
@@ -321,10 +328,14 @@ def ingest_file(file_path: str, force_method: str = None):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("❌ Usage: python embedding_to_supabase.py <file> [force_method]")
+        print("❌ Usage: python embedding_to_supabase.py <file> [force_method] [version]")
         sys.exit(1)
+
     file_path = sys.argv[1]
     force_method = sys.argv[2] if len(sys.argv) > 2 else None
-    ingest_file(file_path, force_method)
+    version = sys.argv[3] if len(sys.argv) > 3 else None
+
+    ingest_file(file_path, force_method, version)
+
 
 
