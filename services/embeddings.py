@@ -3,6 +3,8 @@
 import os
 import re
 from openai import OpenAI
+import asyncio
+import json
 
 # Load API key from environment variable
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -49,26 +51,24 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 def expand_user_query(text):
      return client.responses.create(
-                    model="gpt-4o-mini",
+                    model="gpt-4.1-nano",
                     input=[{"role": "user", "content": text}],
                     instructions=query_expansion_instructions,
                     stream=False
                 ).output_text
 
 # Function to get embeddings for a given text
-def get_embedding(text: str):
+def get_embedding(text: str, model="text-embedding-3-large"):
     """
     Generate an embedding vector for the given input text using OpenAI embeddings API.
     """
-    expanded_q = expand_user_query(text)
-    print(f"Expanded user query: {expanded_q}")
     response = client.embeddings.create(
-        model="text-embedding-3-large",
-        input=expanded_q
+        model=model,
+        input=text
     )
     return response.data[0].embedding
 
-def response_instructions(knowledge_base):
+def response_instructions(knowledge_base, additional_rules=None):
     return f"""
         ### 📌 Chatbot Instructions
 
@@ -81,10 +81,12 @@ def response_instructions(knowledge_base):
 
         1. The chatbot must only use the information from the provided sources to answer questions.
         2. If the answer cannot be found in the sources, the chatbot should clearly say so.
-        3. The chatbot should respond in users language
-        4. In the last line of your answer include comma separated list of ids (further referenced as "uuid list") of sources that you have used to produce response. Example [9830219d-78bb-491b-9af0-7826e34878d2,886492ad-502a-443d-aef7-7559826f1309]
-        5. Include all sources you reference in answer in uuid list
-        6. If no sources were relevant and none of them was used then do not write line with uuids
+        3. The chatbot should respond in language that uses user. 
+        4. If language cant be determined from messages of the user then fallback to english
+        5. In the last line of your answer include comma separated list of ids (further referenced as "uuid list") of sources that you have used to produce response. Example [9830219d-78bb-491b-9af0-7826e34878d2,886492ad-502a-443d-aef7-7559826f1309]
+        6. Include all sources you reference in answer in uuid list
+        7. If no sources were relevant and none of them was used then do not write line with uuids
+        {additional_rules}
 
         ---
 
@@ -102,6 +104,48 @@ def get_ai_response(knowledge_base, question):
                     instructions=response_instructions(knowledge_base),
                     stream=False
                 )
+
+async def stream_openai_response(knowledge_base, question):
+    additional_rules = """
+        8. Start uuid list with '$'. Example: $[9830219d-78bb-491b-9af0-7826e34878d2,886492ad-502a-443d-aef7-7559826f1309]
+    """
+    response = client.responses.create(
+                    model="gpt-4.1",
+                    input=[{"role": "user", "content": question}],
+                    instructions=response_instructions(knowledge_base, additional_rules),
+                    stream=True
+                )
+
+    full_text = ""
+    last_sent_len = 0
+    post_dollar = None
+
+    for chunk in response:
+        if chunk.type == "response.output_text.delta":
+            delta = chunk.delta
+            full_text += delta
+
+            if '$' in full_text:
+                parts = full_text.split('$', 1)
+                content = parts[0]
+                post_dollar = parts[1]
+            else:
+                content = full_text
+                post_dollar = ""
+
+            new_content = content[last_sent_len:]
+            if new_content:
+                yield f"data: {json.dumps({'content': new_content})}\n\n"
+            last_sent_len = len(content)
+
+            await asyncio.sleep(0.02)
+        elif chunk.type == "response.completed":
+            if post_dollar:
+                used_ids = extract_source_ids_from_res(post_dollar)
+                if used_ids:
+                    sources = [{"id": r.get("id"), "title": r.get("title")} for r in knowledge_base if r.get("id") in used_ids]
+                    yield f"data: {json.dumps({'sources': sources})}\n\n"
+            yield "data: [DONE]\n\n"
 
 def extract_source_ids_from_res(res: str):
     lines = [line.strip() for line in res.strip().splitlines() if line.strip()]

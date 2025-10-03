@@ -16,7 +16,7 @@ else:
 # Initialize Supabase client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-def match_documents(query_embedding, top_k: int = 3):
+def match_documents(query_embedding, top_k: int = 3, threshold=0.4):
     """
     Calls the 'match_documents' Postgres function in Supabase to find similar chunks.
     """
@@ -24,7 +24,8 @@ def match_documents(query_embedding, top_k: int = 3):
         "match_documents",
         {
             "query_embedding": query_embedding,
-            "match_count": top_k
+            "match_count": top_k,
+            "match_threshold": threshold # test with other values in future, when there will be more data in db
         }
     ).execute()
 

@@ -1,15 +1,17 @@
 # routes/query.py
 from dotenv import load_dotenv
+from fastapi.responses import StreamingResponse
 
 load_dotenv()
 
 from fastapi import APIRouter, HTTPException
 from models.query_request import QueryRequest
-from services.embeddings import extract_source_ids_from_res, get_embedding, get_ai_response, remove_uuid_line
+from services.embeddings import expand_user_query, extract_source_ids_from_res, get_embedding, get_ai_response, remove_uuid_line, stream_openai_response
 from services.supabase_client import match_documents, match_knowledge_base
 from openai import OpenAI
 import os
 import json
+import asyncio
 
 router = APIRouter()
 
@@ -26,9 +28,10 @@ async def query_docs(req: QueryRequest):
     """
     try:
         print("🔹 Incoming request:", req.dict())
+        expanded_q = expand_user_query(req.question)
 
         print("🔹 Generating embedding...")
-        embedding = get_embedding(req.question)
+        embedding = get_embedding(expanded_q)
         print(f"✅ Embedding created. First 5 values: {embedding[:5]}")
 
         print("🔹 Querying Supabase for matches...")
@@ -95,4 +98,45 @@ async def ask_gpt(req: QueryRequest):
     except Exception as e:
         print("❌ ERROR in ask_gpt:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/stream", summary="Ask GPT with context. Streamed response")
+async def stream(req: QueryRequest):
+    try:
+        async def event_stream():
+            try:
+                yield f"data: {json.dumps({'status': 'Analyzing users question...'})}\n\n"
+                await asyncio.sleep(0)
+
+                expanded_q = expand_user_query(req.question)
+
+                yield f"data: {json.dumps({'status': 'Preparing search query...'})}\n\n"
+                await asyncio.sleep(0)
+
+                #generate vectors from users question. knowledge_base - larger model(3072 vector size), documents - smaller model(1536 vector size)
+                # embedding = get_embedding(expanded_q, model="text-embedding-3-large") # for knowledge_base table larger model
+                embedding = get_embedding(expanded_q, model="text-embedding-3-small") # for documents table smaller model
+
+                yield f"data: {json.dumps({'status': 'Searching relevant sources...'})}\n\n"
+                await asyncio.sleep(0)
+
+                # results = match_knowledge_base(embedding, req.top_k) # vector search in knowledge_base table
+                results = match_documents(embedding, req.top_k, threshold=0.1) # vector search in documents table
+                print(f"✅ Supabase returned {len(results)} matches")
+
+
+                yield f"data: {json.dumps({'status': 'Analyzing sources...'})}\n\n"
+                await asyncio.sleep(0)
+
+                # for final chat gpt response changing sources table does not change anything
+                async for chunk in stream_openai_response(results, req.question):
+                    yield chunk
+            except Exception as e:
+                yield f"data: {json.dumps({'error': 'Something went wrong', 'exception': str(e)})}"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    except Exception as e:
+        print(f"Error in chat endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="Something went wrong")
 
