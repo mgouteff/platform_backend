@@ -1,11 +1,15 @@
 # routes/query.py
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from fastapi import APIRouter, HTTPException
 from models.query_request import QueryRequest
-from services.embeddings import get_embedding
-from services.supabase_client import match_documents
+from services.embeddings import extract_source_ids_from_res, get_embedding, get_ai_response, remove_uuid_line
+from services.supabase_client import match_documents, match_knowledge_base
 from openai import OpenAI
 import os
+import json
 
 router = APIRouter()
 
@@ -23,19 +27,21 @@ async def query_docs(req: QueryRequest):
     try:
         print("🔹 Incoming request:", req.dict())
 
-        # Step 1: Create embedding for the question
         print("🔹 Generating embedding...")
         embedding = get_embedding(req.question)
         print(f"✅ Embedding created. First 5 values: {embedding[:5]}")
 
-        # Step 2: Query Supabase with embedding
         print("🔹 Querying Supabase for matches...")
-        results = match_documents(embedding, req.top_k)
+        results = match_knowledge_base(embedding, 15)
         print(f"✅ Supabase returned {len(results)} matches")
 
+        response = get_ai_response(knowledge_base=results, question=req.question)
+
+        used_ids = extract_source_ids_from_res(response.output_text)
+
         return {
-            "question": req.question,
-            "results": results
+            "text": remove_uuid_line(response.output_text) if used_ids else response.output_text,
+            "sources": [{"id": r.get("id"), "title": r.get("title")} for r in results if r.get("id") in used_ids],
         }
 
     except Exception as e:

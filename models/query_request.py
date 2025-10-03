@@ -7,5 +7,5 @@ class QueryRequest(BaseModel):
     - top_k: how many results to return (default = 3)
     """
     question: str
-    top_k: int = 3
+    top_k: int = 10
 
