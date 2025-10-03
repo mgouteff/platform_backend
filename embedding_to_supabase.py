@@ -123,7 +123,6 @@ def extract_regex_tags(text):
     tags = set()
 
     # Pattern 1: § with optional subsections and letters
-    # Examples: § 79, § 79 odst. 2, § 79 odst. 2 písm. b)
     pattern_sections = r"§\s*\d+[a-zA-Z]*" \
                        r"(?:\s*odst\.\s*\d+)?" \
                        r"(?:\s*písm\.\s*[a-z])?"
@@ -134,7 +133,6 @@ def extract_regex_tags(text):
     for pattern in [pattern_sections, pattern_subsections]:
         matches = re.findall(pattern, text)
         if matches:
-            # If pattern has capture groups, re.findall returns tuples → flatten
             if isinstance(matches[0], tuple):
                 matches = ["".join(m) for m in matches]
             tags.update(m.strip() for m in matches if m.strip())
@@ -142,11 +140,6 @@ def extract_regex_tags(text):
     return list(tags)
 
 def gpt_generate_tags(text, max_semantic=5):
-    """
-    Use GPT to generate two sets of tags:
-    1. Structural references (unlimited)
-    2. Semantic meaning tags (up to max_semantic)
-    """
     prompt = f"""Extract tags from the following text.
 Split them into two groups:
 
@@ -294,8 +287,12 @@ def ingest_file(file_path: str, force_method: str = None, version: str = None):
 
     print(f"✂️ Created {len(chunks)} chunks.")
 
+    # Save CSVs into your Processed Data folder
+    csv_dir = r"C:\Users\mgout\Documents\Apps\Processed Data"
+    os.makedirs(csv_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    csv_file = f"{os.path.splitext(filename)[0]}_{method}_{timestamp}.csv"
+    csv_file = os.path.join(csv_dir, f"{os.path.splitext(filename)[0]}_{method}_{timestamp}.csv")
+
     with open(csv_file, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["id", "title", "content", "tags", "method", "source_file", "version"])
@@ -336,6 +333,3 @@ if __name__ == "__main__":
     version = sys.argv[3] if len(sys.argv) > 3 else None
 
     ingest_file(file_path, force_method, version)
-
-
-
